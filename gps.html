@@ -77,13 +77,11 @@
         }
 
         function loadRadars() {
-            fetch('radars.json')  // Assurez-vous que le chemin est correct
+            return fetch('radars.json')  // Assurez-vous que le chemin est correct
                 .then(response => response.json())
-                .then(data => {
-                    return data;
-                })
                 .catch(error => {
                     console.error('Erreur lors du chargement des radars:', error);
+                    return [];
                 });
         }
 
@@ -101,15 +99,13 @@
                     if (startLatLng && destLatLng) {
                         controlRouting.setWaypoints([startLatLng, destLatLng]);
 
-                        // Lorsque l'itinéraire est calculé, obtenir les coordonnées de l'itinéraire
                         controlRouting.on('routesfound', function(e) {
                             var route = e.routes[0];
                             var line = route.route.geometry.coordinates;
-                            var lineCoords = line.map(coord => L.latLng(coord[1], coord[0]));
-                            var lineString = turf.lineString(line.map(coord => [coord[0], coord[1]]));
+                            var lineCoords = line.map(coord => [coord[1], coord[0]]);
+                            var lineString = turf.lineString(lineCoords);
                             var buffer = turf.buffer(lineString, 20, { units: 'meters' });
 
-                            // Charger les radars et filtrer ceux dans le buffer
                             loadRadars().then(radars => {
                                 var radarsInBuffer = getRadarsInBuffer(radars, buffer);
                                 radarsLayer.clearLayers();
