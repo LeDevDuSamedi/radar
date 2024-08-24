@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carte des Radars</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { height: 100vh; margin: 0; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        // Initialiser la carte
+        var map = L.map('map').setView([48.8566, 2.3522], 10);  // Centrer la carte sur Paris par défaut
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+        }).addTo(map);
+
+        // Fonction pour obtenir l'icône en fonction du type de radar
+        function getRadarIcon(type) {
+            var iconUrl;
+            switch (type) {
+                case 'discriminants':
+                    iconUrl = 'img/big.png';
+                    break;
+                case 'fixes':
+                    iconUrl = 'img/classic.png';
+                    break;
+                case 'feux':
+                    iconUrl = 'img/light.png';
+                    break;
+                case 'itineraire':
+                    iconUrl = 'img/Unknown.png';
+                    break;
+                case 'troncons':
+                    iconUrl = 'img/moyenne.png'
+                break;
+                case 'niveaux':
+                    iconUrl = 'img/PN.png'
+                break;
+                    
+                default:
+                    iconUrl = 'img/Unknown.png';
+            }
+
+            return L.icon({
+                iconUrl: iconUrl,
+                iconSize: [32, 32],  // Taille de l'icône
+                iconAnchor: [16, 32],  // Ancrage de l'icône
+                popupAnchor: [0, -32]  // Ancrage de la popup
+            });
+        }
+
+        // Charger et afficher les radars
+        function loadRadars() {
+            fetch('radars.json')  // Assurez-vous que le chemin est correct
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Erreur réseau : ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    data.forEach(radar => {
+                        if (radar.type === 'itineraire') {
+                            // Tracer l'itinéraire avec une ligne verte
+                            L.polyline(radar.geoJson, {
+                                color: 'green',
+                                weight: 5,
+                                opacity: 0.7
+                            }).addTo(map);
+                        } else {
+                            // Ajouter les marqueurs pour les radars fixes
+                            var marker = L.marker([radar.lat, radar.lng], { icon: getRadarIcon(radar.type) })
+                                .bindPopup(`Radar ID: ${radar.id}<br>Type: ${radar.typeLabel}<br> <a target='_BLANK' href='learn/`+radar.type+`.html'>En savoir plus</a> `);
+                            marker.addTo(map);
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Erreur lors du chargement des radars:', error);
+                    alert('Erreur lors du chargement des radars. Vérifiez le fichier JSON et le chemin.');
+                });
+        }
+
+        loadRadars();  // Charger les radars lorsque la page est prête
+    </script>
+</body>
+</html>
