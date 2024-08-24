@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Radars sur la Route</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
     <style>
         #map { height: 70vh; margin: 0; }
         #controls {
@@ -13,7 +14,7 @@
             align-items: center;
             margin: 10px 0;
         }
-        #controls input, #controls select, #controls button {
+        #controls input, #controls button {
             margin: 5px;
             padding: 10px;
             font-size: 16px;
@@ -28,11 +29,10 @@
         <input type="text" id="destination" placeholder="Adresse de destination">
         <button id="use-location">Utiliser ma position actuelle comme départ</button>
         <button id="calculate">Calculer l'itinéraire</button>
-        <select id="selectStart" style="display:none;"></select>
-        <select id="selectDestination" style="display:none;"></select>
     </div>
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
     <script>
         var map = L.map('map').setView([48.8566, 2.3522], 10);  // Centrer la carte sur Paris par défaut
 
@@ -40,93 +40,24 @@
             maxZoom: 19,
         }).addTo(map);
 
-        var drawnRoute = null;
-
-        // Fonction pour obtenir l'icône en fonction du type de radar
-        function getRadarIcon(type) {
-            var iconUrl;
-            switch (type) {
-                case 'discriminants':
-                    iconUrl = 'img/big.png';
-                    break;
-                case 'fixes':
-                    iconUrl = 'img/classic.png';
-                    break;
-                case 'feux':
-                    iconUrl = 'img/light.png';
-                    break;
-                case 'itineraire':
-                    iconUrl = 'img/Unknown.png';
-                    break;
-                case 'troncons':
-                    iconUrl = 'img/moyenne.png';
-                    break;
-                case 'niveaux':
-                    iconUrl = 'img/PN.png';
-                    break;
-                default:
-                    iconUrl = 'img/Unknown.png';
+        // Créer une instance de Routing Machine
+        var controlRouting = L.Routing.control({
+            waypoints: [],
+            router: L.Routing.osrmv1({ language: 'fr', profile: 'car' }),  // Utilisation du service OSRM
+            createMarker: function() { return null; },  // Pas de marqueurs sur les waypoints
+            routeWhileDragging: true,
+            lineOptions: {
+                styles: [{ color: 'blue', opacity: 0.6, weight: 4 }]
             }
+        }).addTo(map);
 
-            return L.icon({
-                iconUrl: iconUrl,
-                iconSize: [32, 32],  // Taille de l'icône
-                iconAnchor: [16, 32],  // Ancrage de l'icône
-                popupAnchor: [0, -32]  // Ancrage de la popup
-            });
-        }
-
-        // Fonction pour calculer la distance entre un point et une ligne
-        function getDistanceFromLine(latlng, line) {
-            var closestPoint = L.GeometryUtil.closest(map, line, latlng);
-            return map.distance(latlng, closestPoint);
-        }
-
-        // Charger et afficher les radars proches de la route
-        function loadRadars(route) {
-            fetch('radars.json')  // Assurez-vous que le chemin est correct
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Erreur réseau : ' + response.status);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    data.forEach(radar => {
-                        var radarLatLng = L.latLng(radar.lat, radar.lng);
-
-                        // Filtrer les radars proches de la route (ici 2 km)
-                        if (route && getDistanceFromLine(radarLatLng, route) <= 2000) {
-                            var marker = L.marker([radar.lat, radar.lng], { icon: getRadarIcon(radar.type) })
-                                .bindPopup(`Radar ID: ${radar.id}<br>Type: ${radar.typeLabel}<br> <a target='_BLANK' href='learn/`+radar.type+`.html'>En savoir plus</a> `);
-                            marker.addTo(map);
-                        }
-                    });
-                })
-                .catch(error => {
-                    console.error('Erreur lors du chargement des radars:', error);
-                    alert('Erreur lors du chargement des radars. Vérifiez le fichier JSON et le chemin.');
-                });
-        }
-
-        // Fonction pour géocoder une adresse et gérer plusieurs résultats
-        function geocodeAddress(address, selectElementId) {
+        // Fonction pour géocoder une adresse
+        function geocodeAddress(address) {
             return fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}`)
                 .then(response => response.json())
                 .then(data => {
-                    const selectElement = document.getElementById(selectElementId);
-                    selectElement.style.display = "block";
-                    selectElement.innerHTML = ""; // Clear previous options
-
                     if (data.features.length > 0) {
-                        data.features.forEach((feature, index) => {
-                            const option = document.createElement("option");
-                            option.value = feature.geometry.coordinates.reverse(); // Retourne [lat, lng]
-                            option.text = feature.properties.label;
-                            selectElement.add(option);
-                        });
-
-                        return selectElement.options[0].value.split(',').map(Number);
+                        return L.latLng(data.features[0].geometry.coordinates.reverse());  // Retourne [lat, lng]
                     } else {
                         throw new Error('Adresse non trouvée.');
                     }
@@ -138,22 +69,10 @@
             var startAddress = document.getElementById('start').value;
             var destinationAddress = document.getElementById('destination').value;
 
-            Promise.all([geocodeAddress(startAddress, 'selectStart'), geocodeAddress(destinationAddress, 'selectDestination')])
+            Promise.all([geocodeAddress(startAddress), geocodeAddress(destinationAddress)])
                 .then(function([startLatLng, destLatLng]) {
-                    startLatLng = document.getElementById('selectStart').value.split(',').map(Number);
-                    destLatLng = document.getElementById('selectDestination').value.split(',').map(Number);
-
-                    if (drawnRoute) {
-                        map.removeLayer(drawnRoute);
-                    }
-                    drawnRoute = L.polyline([startLatLng, destLatLng], {
-                        color: 'blue',
-                        weight: 5,
-                        opacity: 0.7
-                    }).addTo(map);
-
-                    map.fitBounds(drawnRoute.getBounds());
-                    loadRadars(drawnRoute);  // Charger les radars proches de la nouvelle route
+                    // Mettre à jour les waypoints de Routing Machine
+                    controlRouting.setWaypoints([startLatLng, destLatLng]);
                 })
                 .catch(function(error) {
                     alert('Erreur lors de la géolocalisation : ' + error.message);
@@ -164,9 +83,9 @@
         document.getElementById('use-location').addEventListener('click', function() {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(function(position) {
-                    var latlng = [position.coords.latitude, position.coords.longitude];
+                    var latlng = L.latLng(position.coords.latitude, position.coords.longitude);
                     map.setView(latlng, 13);
-                    document.getElementById('start').value = latlng.join(', ');
+                    document.getElementById('start').value = latlng.lat + ', ' + latlng.lng;
                 }, function(error) {
                     alert('Erreur lors de la récupération de la position : ' + error.message);
                 });
@@ -174,8 +93,6 @@
                 alert('La géolocalisation n\'est pas supportée par ce navigateur.');
             }
         });
-
-        loadRadars();  // Charger les radars lorsque la page est prête (sans itinéraire initialement)
     </script>
 </body>
 </html>
