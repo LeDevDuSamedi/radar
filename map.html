@@ -21,6 +21,16 @@
             maxZoom: 19,
         }).addTo(map);
 
+        // Créer des groupes de calques pour chaque type de radar
+        var layerGroups = {
+            discriminants: L.layerGroup(),
+            fixes: L.layerGroup(),
+            feux: L.layerGroup(),
+            itineraire: L.layerGroup(),
+            troncons: L.layerGroup(),
+            niveaux: L.layerGroup()
+        };
+
         // Fonction pour obtenir l'icône en fonction du type de radar
         function getRadarIcon(type) {
             var iconUrl;
@@ -39,11 +49,10 @@
                     break;
                 case 'troncons':
                     iconUrl = 'img/moyenne.png'
-                break;
+                    break;
                 case 'niveaux':
                     iconUrl = 'img/PN.png'
-                break;
-                    
+                    break;
                 default:
                     iconUrl = 'img/Unknown.png';
             }
@@ -69,18 +78,22 @@
                     data.forEach(radar => {
                         if (radar.type === 'itineraire') {
                             // Tracer l'itinéraire avec une ligne verte
-                            L.polyline(radar.geoJson, {
+                            var polyline = L.polyline(radar.geoJson, {
                                 color: 'green',
                                 weight: 5,
                                 opacity: 0.7
-                            }).addTo(map);
+                            });
+                            polyline.addTo(layerGroups[radar.type]);
                         } else {
                             // Ajouter les marqueurs pour les radars fixes
                             var marker = L.marker([radar.lat, radar.lng], { icon: getRadarIcon(radar.type) })
                                 .bindPopup(`Radar ID: ${radar.id}<br>Type: ${radar.typeLabel}<br> <a target='_BLANK' href='learn/`+radar.type+`.html'>En savoir plus</a> `);
-                            marker.addTo(map);
+                            marker.addTo(layerGroups[radar.type]);
                         }
                     });
+
+                    // Ajouter tous les groupes de calques à la carte
+                    Object.values(layerGroups).forEach(layerGroup => layerGroup.addTo(map));
                 })
                 .catch(error => {
                     console.error('Erreur lors du chargement des radars:', error);
@@ -89,6 +102,16 @@
         }
 
         loadRadars();  // Charger les radars lorsque la page est prête
+
+        // Ajouter le contrôle des couches pour activer/désactiver les groupes de radars
+        L.control.layers(null, {
+            'Radars Discriminants': layerGroups.discriminants,
+            'Radars Fixes': layerGroups.fixes,
+            'Radars de Feux': layerGroups.feux,
+            'Radars Itinéraires': layerGroups.itineraire,
+            'Radars de Tronçons': layerGroups.troncons,
+            'Radars de Niveaux': layerGroups.niveaux
+        }).addTo(map);
     </script>
 </body>
 </html>
