@@ -101,20 +101,24 @@
 
                         controlRouting.on('routesfound', function(e) {
                             var route = e.routes[0];
-                            var line = route.route.geometry.coordinates;
-                            var lineCoords = line.map(coord => [coord[1], coord[0]]);
-                            var lineString = turf.lineString(lineCoords);
-                            var buffer = turf.buffer(lineString, 20, { units: 'meters' });
+                            if (route && route.route && route.route.geometry) {
+                                var line = route.route.geometry.coordinates;
+                                var lineCoords = line.map(coord => [coord[1], coord[0]]);
+                                var lineString = turf.lineString(lineCoords);
+                                var buffer = turf.buffer(lineString, 20, { units: 'meters' });
 
-                            loadRadars().then(radars => {
-                                var radarsInBuffer = getRadarsInBuffer(radars, buffer);
-                                radarsLayer.clearLayers();
-                                radarsInBuffer.forEach(radar => {
-                                    L.marker([radar.lat, radar.lng])
-                                        .bindPopup(`Radar ID: ${radar.id}<br>Type: ${radar.typeLabel}<br> <a target='_BLANK' href='learn/`+radar.type+`.html'>En savoir plus</a>`)
-                                        .addTo(radarsLayer);
+                                loadRadars().then(radars => {
+                                    var radarsInBuffer = getRadarsInBuffer(radars, buffer);
+                                    radarsLayer.clearLayers();
+                                    radarsInBuffer.forEach(radar => {
+                                        L.marker([radar.lat, radar.lng])
+                                            .bindPopup(`Radar ID: ${radar.id}<br>Type: ${radar.typeLabel}<br> <a target='_BLANK' href='learn/`+radar.type+`.html'>En savoir plus</a>`)
+                                            .addTo(radarsLayer);
+                                    });
                                 });
-                            });
+                            } else {
+                                alert('Impossible de calculer l\'itinéraire.');
+                            }
                         });
                     } else {
                         alert('Impossible de trouver l\'itinéraire. Vérifiez les adresses.');
