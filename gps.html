@@ -33,6 +33,7 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+    <script src="https://unpkg.com/turf/turf.min.js"></script>
     <script>
         var map = L.map('map').setView([48.8566, 2.3522], 10);  // Centrer la carte sur Paris par défaut
 
@@ -40,46 +41,94 @@
             maxZoom: 19,
         }).addTo(map);
 
-        // Créer une instance de Routing Machine
         var controlRouting = L.Routing.control({
             waypoints: [],
-            router: L.Routing.osrmv1({ language: 'fr', profile: 'car' }),  // Utilisation du service OSRM
-            createMarker: function() { return null; },  // Pas de marqueurs sur les waypoints
+            router: L.Routing.osrmv1({ language: 'fr', profile: 'car' }),
+            createMarker: function() { return null; },
             routeWhileDragging: true,
             lineOptions: {
                 styles: [{ color: 'blue', opacity: 0.6, weight: 4 }]
             }
         }).addTo(map);
 
-        // Fonction pour géocoder une adresse
+        var radarsLayer = L.layerGroup().addTo(map);
+
         function geocodeAddress(address) {
             return fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.features.length > 0) {
-                        return L.latLng(data.features[0].geometry.coordinates.reverse());  // Retourne [lat, lng]
+                        return L.latLng(data.features[0].geometry.coordinates.reverse());
                     } else {
                         throw new Error('Adresse non trouvée.');
                     }
                 });
         }
 
-        // Calculer l'itinéraire
+        function getRadarsInBuffer(radarData, buffer) {
+            var radarsInBuffer = [];
+            radarData.forEach(radar => {
+                var radarLatLng = L.latLng(radar.lat, radar.lng);
+                if (turf.booleanPointInPolygon([radarLatLng.lng, radarLatLng.lat], buffer)) {
+                    radarsInBuffer.push(radar);
+                }
+            });
+            return radarsInBuffer;
+        }
+
+        function loadRadars() {
+            fetch('radars.json')  // Assurez-vous que le chemin est correct
+                .then(response => response.json())
+                .then(data => {
+                    return data;
+                })
+                .catch(error => {
+                    console.error('Erreur lors du chargement des radars:', error);
+                });
+        }
+
         document.getElementById('calculate').addEventListener('click', function() {
             var startAddress = document.getElementById('start').value;
             var destinationAddress = document.getElementById('destination').value;
 
+            if (!startAddress || !destinationAddress) {
+                alert('Veuillez entrer les adresses de départ et de destination.');
+                return;
+            }
+
             Promise.all([geocodeAddress(startAddress), geocodeAddress(destinationAddress)])
                 .then(function([startLatLng, destLatLng]) {
-                    // Mettre à jour les waypoints de Routing Machine
-                    controlRouting.setWaypoints([startLatLng, destLatLng]);
+                    if (startLatLng && destLatLng) {
+                        controlRouting.setWaypoints([startLatLng, destLatLng]);
+
+                        // Lorsque l'itinéraire est calculé, obtenir les coordonnées de l'itinéraire
+                        controlRouting.on('routesfound', function(e) {
+                            var route = e.routes[0];
+                            var line = route.route.geometry.coordinates;
+                            var lineCoords = line.map(coord => L.latLng(coord[1], coord[0]));
+                            var lineString = turf.lineString(line.map(coord => [coord[0], coord[1]]));
+                            var buffer = turf.buffer(lineString, 20, { units: 'meters' });
+
+                            // Charger les radars et filtrer ceux dans le buffer
+                            loadRadars().then(radars => {
+                                var radarsInBuffer = getRadarsInBuffer(radars, buffer);
+                                radarsLayer.clearLayers();
+                                radarsInBuffer.forEach(radar => {
+                                    L.marker([radar.lat, radar.lng])
+                                        .bindPopup(`Radar ID: ${radar.id}<br>Type: ${radar.typeLabel}<br> <a target='_BLANK' href='learn/`+radar.type+`.html'>En savoir plus</a>`)
+                                        .addTo(radarsLayer);
+                                });
+                            });
+                        });
+                    } else {
+                        alert('Impossible de trouver l\'itinéraire. Vérifiez les adresses.');
+                    }
                 })
                 .catch(function(error) {
                     alert('Erreur lors de la géolocalisation : ' + error.message);
                 });
         });
 
-        // Utiliser la position actuelle de l'utilisateur comme point de départ
         document.getElementById('use-location').addEventListener('click', function() {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(function(position) {
