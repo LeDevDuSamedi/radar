@@ -1,37 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GraphHopper Routing Example</title>
+    <title>Carte des Radars et Itinéraire</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
     <style>
-        #map { height: 70vh; margin: 0; }
-        #controls {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin: 10px 0;
-        }
-        #controls input, #controls button {
-            margin: 5px;
-            padding: 10px;
-            font-size: 16px;
-            width: 300px;
-        }
+        #map { height: 60vh; margin: 0; }
+        #controls { padding: 10px; background: white; }
+        #address-form { margin-bottom: 10px; }
+        #radar-table { margin-top: 10px; width: 100%; }
+        #radar-table th, #radar-table td { padding: 5px; }
     </style>
 </head>
 <body>
-    <div id="map"></div>
     <div id="controls">
-        <input type="text" id="start" placeholder="Adresse de départ">
-        <input type="text" id="destination" placeholder="Adresse de destination">
-        <button id="calculate">Calculer l'itinéraire</button>
+        <form id="address-form">
+            <label for="start">Départ :</label>
+            <input type="text" id="start" placeholder="Adresse de départ" required>
+            <label for="end">Arrivée :</label>
+            <input type="text" id="end" placeholder="Adresse d'arrivée" required>
+            <button type="submit">Tracer l'itinéraire</button>
+        </form>
+        <button id="detect-radars">Détecter les radars</button>
+        <div id="map"></div>
+        <table id="radar-table" border="1">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Kilométrage</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
     </div>
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
     <script>
         var map = L.map('map').setView([48.8566, 2.3522], 10);  // Centrer la carte sur Paris par défaut
 
@@ -39,46 +48,185 @@
             maxZoom: 19,
         }).addTo(map);
 
-        var routingControl = L.Routing.control({
-            waypoints: [],
-            router: L.Routing.graphHopper('0675d981-5c60-48ff-9e06-fa835d431651'),
-            createMarker: function() { return null; },
-            routeWhileDragging: true
-        }).addTo(map);
+        var radars = [];
+        var radarMarkers = []; // Tableau pour stocker les marqueurs de radars
+        var routeLayers = []; // Tableau pour stocker les couches d'itinéraires
+        var userRouteLatLngs = []; // Tableau pour stocker les coordonnées de l'itinéraire de l'utilisateur
 
-        document.getElementById('calculate').addEventListener('click', function() {
-            var startAddress = document.getElementById('start').value;
-            var destinationAddress = document.getElementById('destination').value;
-
-            if (!startAddress || !destinationAddress) {
-                alert('Veuillez entrer les adresses de départ et de destination.');
-                return;
+        // Fonction pour obtenir l'icône en fonction du type de radar
+        function getRadarIcon(type) {
+            var iconUrl;
+            switch (type) {
+                case 'discriminants': iconUrl = 'img/big.png'; break;
+                case 'fixes': iconUrl = 'img/classic.png'; break;
+                case 'feux': iconUrl = 'img/light.png'; break;
+                case 'itineraire': iconUrl = 'img/Unknown.png'; break;
+                case 'troncons': iconUrl = 'img/moyenne.png'; break;
+                case 'niveaux': iconUrl = 'img/PN.png'; break;
+                default: iconUrl = 'img/Unknown.png';
             }
+            return L.icon({
+                iconUrl: iconUrl,
+                iconSize: [32, 32],  // Taille de l'icône
+                iconAnchor: [16, 32],  // Ancrage de l'icône
+                popupAnchor: [0, -32]  // Ancrage de la popup
+            });
+        }
 
-            Promise.all([geocodeAddress(startAddress), geocodeAddress(destinationAddress)])
-                .then(function([startLatLng, destLatLng]) {
-                    if (startLatLng && destLatLng) {
-                        routingControl.setWaypoints([startLatLng, destLatLng]);
-                    } else {
-                        alert('Impossible de trouver l\'itinéraire. Vérifiez les adresses.');
+        // Charger les données des radars depuis le fichier radars.json
+        function loadRadars() {
+            fetch('radars.json')  // Assurez-vous que le chemin est correct
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Erreur réseau : ' + response.status);
                     }
+                    return response.json();
                 })
-                .catch(function(error) {
-                    alert('Erreur lors de la géolocalisation : ' + error.message);
-                });
-        });
-
-        function geocodeAddress(address) {
-            return fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}`)
-                .then(response => response.json())
                 .then(data => {
-                    if (data.features.length > 0) {
-                        return L.latLng(data.features[0].geometry.coordinates.reverse());
-                    } else {
-                        throw new Error('Adresse non trouvée.');
-                    }
+                    radars = data;  // Stocker les radars dans une variable globale
+                })
+                .catch(error => {
+                    console.error('Erreur lors du chargement des radars:', error);
+                    alert('Erreur lors du chargement des radars. Vérifiez le fichier JSON et le chemin.');
                 });
         }
+
+        loadRadars();  // Charger les radars lorsque la page est prête
+
+        // Initialiser le géocodeur
+        var geocoder = L.Control.Geocoder.nominatim();
+
+        // Fonction pour obtenir les coordonnées d'une adresse
+        function geocodeAddress(address, callback) {
+            geocoder.geocode(address, function(results) {
+                if (results.length > 0) {
+                    callback(results[0].center);
+                } else {
+                    alert('Adresse non trouvée.');
+                }
+            });
+        }
+
+        // Fonction pour tracer l'itinéraire entre deux adresses
+        function traceItinerary(startAddress, endAddress) {
+            geocodeAddress(startAddress, function(startLatLng) {
+                geocodeAddress(endAddress, function(endLatLng) {
+                    L.Routing.control({
+                        waypoints: [
+                            L.latLng(startLatLng.lat, startLatLng.lng),
+                            L.latLng(endLatLng.lat, endLatLng.lng)
+                        ],
+                        routeWhileDragging: true,
+                        createMarker: function() { return null; },  // Ne pas créer de marqueur pour les points intermédiaires
+                        alternatives: true  // Activer les itinéraires alternatifs
+                    }).addTo(map).on('routesfound', function(e) {
+                        var routes = e.routes;
+                        userRouteLatLngs = routes[0].coordinates;
+
+                        // Dessiner les itinéraires après avoir tracé l'itinéraire
+                        drawRoutes(userRouteLatLngs);
+                    });
+                });
+            });
+        }
+
+        // Fonction pour vérifier si un radar est proche de l'itinéraire
+        function findRadarsAlongRoute(routeLatLngs) {
+            function isRadarNearRoute(radarLatLng) {
+                for (var i = 0; i < routeLatLngs.length - 1; i++) {
+                    var start = routeLatLngs[i];
+                    var end = routeLatLngs[i + 1];
+                    var distanceToSegment = L.latLng(radarLatLng.lat, radarLatLng.lng).distanceTo(
+                        L.latLng([start.lat, start.lng], [end.lat, end.lng])
+                    );
+                    if (distanceToSegment < 140) { // Distance seuil pour considérer un radar proche (ici 140 mètres)
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            var nearbyRadars = radars.filter(radar => isRadarNearRoute({ lat: radar.lat, lng: radar.lng }));
+
+            // Supprimer les marqueurs existants
+            radarMarkers.forEach(marker => map.removeLayer(marker));
+            radarMarkers = [];
+
+            // Mettre à jour le tableau des radars
+            var tableBody = document.getElementById('radar-table').getElementsByTagName('tbody')[0];
+            tableBody.innerHTML = '';
+
+            // Ajouter les marqueurs pour les radars proches de l'itinéraire
+            nearbyRadars.forEach(radar => {
+                var distance = L.latLng(userRouteLatLngs[0]).distanceTo(L.latLng(radar.lat, radar.lng)) / 1000; // Distance en km
+                var row = tableBody.insertRow();
+                row.insertCell(0).textContent = radar.id;
+                row.insertCell(1).textContent = radar.type;
+                row.insertCell(2).textContent = distance.toFixed(2) + ' km';
+                var actionsCell = row.insertCell(3);
+                var centerButton = document.createElement('button');
+                centerButton.textContent = 'Centrer';
+                centerButton.onclick = function() {
+                    map.setView([radar.lat, radar.lng], 15); // Centrer la carte sur le radar
+                };
+                actionsCell.appendChild(centerButton);
+
+                var marker = L.marker([radar.lat, radar.lng], { icon: getRadarIcon(radar.type) }).addTo(map)
+                    .bindPopup(`<b>Chargement des détails...</b>`)
+                    .on('click', function() {
+                        // Charger les détails depuis l'URL
+                        fetch(`https://radars.securite-routiere.gouv.fr/radars/${radar.id}`)
+                            .then(response => response.json())
+                            .then(data => {
+                                var details = `
+                                    <b>ID:</b> ${data.nid}<br>
+                                    <b>Type:</b> ${data.radartype[0].name}<br>
+                                    <b>Direction:</b> ${data.direction}<br>
+                                    <b>Commune:</b> ${data.localisation.ville}<br>
+                                    <b>Adresse:</b> ${data.localisation.adresse}
+                                `;
+                                marker.setPopupContent(details);
+                            })
+                            .catch(error => {
+                                marker.setPopupContent('<b>Erreur de chargement des détails</b>');
+                                console.error('Erreur lors du chargement des détails du radar:', error);
+                            });
+                    });
+
+                radarMarkers.push(marker);
+            });
+        }
+
+        // Fonction pour dessiner les itinéraires
+        function drawRoutes(latlngs) {
+            routeLayers.forEach(layer => map.removeLayer(layer)); // Supprimer les anciennes couches d'itinéraires
+            routeLayers = [];
+
+            // Ajouter la couche d'itinéraire de l'utilisateur
+            var userRoute = L.polyline(latlngs, { color: 'blue' }).addTo(map);
+            routeLayers.push(userRoute);
+        }
+
+        document.getElementById('address-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var startAddress = document.getElementById('start').value;
+            var endAddress = document.getElementById('end').value;
+            traceItinerary(startAddress, endAddress);
+        });
+
+        document.getElementById('detect-radars').addEventListener('click', function() {
+            findRadarsAlongRoute(userRouteLatLngs);
+        });
+
+        // Assurez-vous que les radars sont chargés avant de détecter les radars
+        document.getElementById('detect-radars').disabled = true;
+        document.getElementById('detect-radars').addEventListener('click', function() {
+            if (radars.length > 0) {
+                findRadarsAlongRoute(userRouteLatLngs);
+            } else {
+                alert('Les données des radars ne sont pas encore chargées.');
+            }
+        });
     </script>
 </body>
 </html>
