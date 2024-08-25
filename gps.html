@@ -219,7 +219,6 @@
         });
 
         // Assurez-vous que les radars sont chargés avant de détecter les radars
-        document.getElementById('detect-radars').disabled = true;
         document.getElementById('detect-radars').addEventListener('click', function() {
             if (radars.length > 0) {
                 findRadarsAlongRoute(userRouteLatLngs);
